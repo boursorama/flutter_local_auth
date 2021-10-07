@@ -9,6 +9,7 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:meta/meta.dart';
@@ -140,15 +141,16 @@ class LocalAuthentication {
   ///
   /// Returns a [Future] bool true or false:
   Future<bool> get canCheckBiometrics async =>
-      (await _channel.invokeListMethod<String>('getAvailableBiometrics'))!
-          .isNotEmpty;
+      (await _channel.invokeListMethod<String>('getAvailableBiometrics'))!.isNotEmpty;
+
+  /// Returns the domain state if [authenticate] or [getAvailableBiometrics] as been run before
+  Future<Uint8List?> get domainState async => (await _channel.invokeMethod<Uint8List>('getDomainState'));
 
   /// Returns true if device is capable of checking biometrics or is able to
   /// fail over to device credentials.
   ///
   /// Returns a [Future] bool true or false:
-  Future<bool> isDeviceSupported() async =>
-      (await _channel.invokeMethod<bool>('isDeviceSupported')) ?? false;
+  Future<bool> isDeviceSupported() async => (await _channel.invokeMethod<bool>('isDeviceSupported')) ?? false;
 
   /// Returns a list of enrolled biometrics
   ///

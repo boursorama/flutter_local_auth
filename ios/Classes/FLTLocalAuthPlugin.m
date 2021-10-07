@@ -39,6 +39,8 @@
     [self getAvailableBiometrics:result];
   } else if ([@"isDeviceSupported" isEqualToString:call.method]) {
     result(@YES);
+  } else if ([@"getDomainState" isEqualToString:call.method]) {
+    [self getDomainState:result];
   } else {
     result(FlutterMethodNotImplemented);
   }
@@ -91,6 +93,19 @@
   [[UIApplication sharedApplication].delegate.window.rootViewController presentViewController:alert
                                                                                      animated:YES
                                                                                    completion:nil];
+}
+
+
+- (void)getDomainState:(FlutterResult)result {
+    LAContext *context = self.createAuthContext;
+    [context canEvaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics error:nil];
+    NSData *domainState = context.evaluatedPolicyDomainState;
+    
+    if (domainState == NULL) {
+        result(NULL);
+    } else {
+        result([FlutterStandardTypedData typedDataWithBytes:domainState]);
+    }
 }
 
 - (void)getAvailableBiometrics:(FlutterResult)result {
