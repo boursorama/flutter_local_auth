@@ -14,8 +14,13 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.hardware.fingerprint.FingerprintManager;
 import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
 import androidx.fragment.app.FragmentActivity;
 import androidx.lifecycle.Lifecycle;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -29,8 +34,22 @@ import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugins.localauth.AuthenticationHelper.AuthCompletionHandler;
+
+import java.io.IOException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
 
 /**
  * Flutter plugin providing access to local authentication.
@@ -109,6 +128,8 @@ public class LocalAuthPlugin implements MethodCallHandler, FlutterPlugin, Activi
       case "stopAuthentication":
         stopAuthentication(result);
         break;
+      case "generateSecretKey":
+        generateSecretKey(call, result);
       default:
         result.notImplemented();
         break;
@@ -303,6 +324,39 @@ public class LocalAuthPlugin implements MethodCallHandler, FlutterPlugin, Activi
 
   private void isDeviceSupported(Result result) {
     result.success(isDeviceSupported());
+  }
+
+  // See https://developer.android.com/training/sign-in/biometric-auth#crypto
+
+  private void generateSecretKey(MethodCall call, final Result result) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+      result.success(false);
+      return;
+    }
+
+    try {
+      KeyGenerator keyGenerator = KeyGenerator.getInstance(
+              KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+      keyGenerator.init(new KeyGenParameterSpec.Builder(
+              call.<String>argument("keyName"),
+              KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+              .setBlockModes(KeyProperties.BLOCK_MODE_CBC)
+              .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_PKCS7)
+              .setUserAuthenticationRequired(true)
+              // Invalidate the keys if the user has registered a new biometric
+              // credential, such as a new fingerprint. Can call this method only
+              // on Android 7.0 (API level 24) or higher. The variable
+              // "invalidatedByBiometricEnrollment" is true by default.
+              .setInvalidatedByBiometricEnrollment(true)
+              .build());
+      keyGenerator.generateKey();
+
+      result.success(true);
+      return;
+    } catch (Exception e) {
+      result.success(false);
+      return;
+    }
   }
 
   @Override

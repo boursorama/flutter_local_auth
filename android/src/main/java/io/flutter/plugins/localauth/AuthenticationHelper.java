@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.security.keystore.KeyProperties;
 import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -26,7 +27,18 @@ import androidx.lifecycle.DefaultLifecycleObserver;
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LifecycleOwner;
 import io.flutter.plugin.common.MethodCall;
+
+import java.io.IOException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
 import java.util.concurrent.Executor;
+
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
 
 /**
  * Authenticates the user with biometrics and sends corresponding response back to Flutter.
@@ -67,6 +79,7 @@ class AuthenticationHelper extends BiometricPrompt.AuthenticationCallback
   private final boolean isAuthSticky;
   private final UiThreadExecutor uiThreadExecutor;
   private boolean activityPaused = false;
+  private Cipher cipher;
   private BiometricPrompt biometricPrompt;
 
   AuthenticationHelper(
@@ -82,12 +95,25 @@ class AuthenticationHelper extends BiometricPrompt.AuthenticationCallback
     this.isAuthSticky = call.argument("stickyAuth");
     this.uiThreadExecutor = new UiThreadExecutor();
 
+    String key = call.argument("keyName");
+    cipher = null;
+    if (key != null) {
+      cipher = getCipher();
+      SecretKey secretKey = getSecretKey(key);
+      if (cipher != null && secretKey != null) {
+        try {
+          cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+        } catch (Exception e) {
+          cipher = null;
+        }
+      }
+    }
+
     BiometricPrompt.PromptInfo.Builder promptBuilder =
         new BiometricPrompt.PromptInfo.Builder()
             .setDescription((String) call.argument("localizedReason"))
             .setTitle((String) call.argument("signInTitle"))
             .setSubtitle((String) call.argument("biometricHint"))
-            .setConfirmationRequired((Boolean) call.argument("sensitiveTransaction"))
             .setConfirmationRequired((Boolean) call.argument("sensitiveTransaction"));
 
     if (allowCredentials) {
@@ -105,8 +131,14 @@ class AuthenticationHelper extends BiometricPrompt.AuthenticationCallback
     } else {
       activity.getApplication().registerActivityLifecycleCallbacks(this);
     }
+
     biometricPrompt = new BiometricPrompt(activity, uiThreadExecutor, this);
-    biometricPrompt.authenticate(promptInfo);
+
+    if (cipher != null) {
+      biometricPrompt.authenticate(promptInfo, new BiometricPrompt.CryptoObject(cipher));
+    } else {
+      biometricPrompt.authenticate(promptInfo);
+    }
   }
 
   /** Cancels the biometric authentication. */
@@ -181,7 +213,11 @@ class AuthenticationHelper extends BiometricPrompt.AuthenticationCallback
 
   @Override
   public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-    completionHandler.onSuccess();
+    if (cipher == null || (result.getCryptoObject() != null && result.getCryptoObject().getCipher() == cipher)) {
+      completionHandler.onSuccess();
+    } else {
+      completionHandler.onError("BiometryEnrolment", "The operation was canceled because a new biometry has been enrolled.");
+    }
     stop();
   }
 
@@ -258,6 +294,28 @@ class AuthenticationHelper extends BiometricPrompt.AuthenticationCallback
         .setNegativeButton((String) call.argument("cancelButton"), cancelHandler)
         .setCancelable(false)
         .show();
+  }
+
+  private SecretKey getSecretKey(String keyName) {
+    try {
+      KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+
+      // Before the keystore can be accessed, it must be loaded.
+      keyStore.load(null);
+      return ((SecretKey) keyStore.getKey(keyName, null));
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private Cipher getCipher() {
+    try {
+      return Cipher.getInstance(KeyProperties.KEY_ALGORITHM_AES + "/"
+              + KeyProperties.BLOCK_MODE_CBC + "/"
+              + KeyProperties.ENCRYPTION_PADDING_PKCS7);
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   // Unused methods for activity lifecycle.

@@ -100,6 +100,7 @@ class LocalAuthentication {
     IOSAuthMessages iOSAuthStrings = const IOSAuthMessages(),
     bool sensitiveTransaction = true,
     bool biometricOnly = false,
+    String? androidKeyName,
   }) async {
     assert(localizedReason.isNotEmpty);
 
@@ -114,6 +115,10 @@ class LocalAuthentication {
       args.addAll(iOSAuthStrings.args);
     } else if (_platform.isAndroid) {
       args.addAll(androidAuthStrings.args);
+
+      if (androidKeyName != null) {
+        args['keyName'] = androidKeyName;
+      }
     } else {
       throw PlatformException(
         code: otherOperatingSystem,
@@ -143,8 +148,15 @@ class LocalAuthentication {
   Future<bool> get canCheckBiometrics async =>
       (await _channel.invokeListMethod<String>('getAvailableBiometrics'))!.isNotEmpty;
 
-  /// Returns the domain state if [authenticate] or [getAvailableBiometrics] as been run before
-  Future<Uint8List?> get domainState async => (await _channel.invokeMethod<Uint8List>('getDomainState'));
+  /// iOS only: Returns the domain state if [authenticate] or [getAvailableBiometrics] as been run before
+  /// If this valu changes, it means a new fingerprint/face has been added/removed
+  Future<Uint8List?> get getIOSDomainState async =>
+      _platform.isIOS ? (await _channel.invokeMethod<Uint8List>('getDomainState')) : null;
+
+  /// Android only: Generates a key that will be associated with the enrolled biometry.
+  /// If a new fingerprint/face is added/removed, the key is invalidated and the authentication fails.
+  Future<bool> generateAndroidSecretKey(String keyName) async =>
+      _platform.isAndroid ? (await _channel.invokeMethod<bool>('generateSecretKey', <String, String>{'keyName': keyName})) ?? false : false;
 
   /// Returns true if device is capable of checking biometrics or is able to
   /// fail over to device credentials.
